@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "time-tracking",
+    "slug": "time-tracking",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bethanyhull.timetracking",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow Time Tracking to use the microphone for recording.",
+        "NSSpeechRecognitionUsageDescription": "Allow Time Tracking to use speech recognition to transcribe recordings.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.timetracking.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sqlite",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Time Tracking to use the microphone for recording.",
+          "speechRecognitionPermission": "Allow Time Tracking to use speech recognition to transcribe recordings."
+        }
+      ],
+      "expo-audio",
+      "expo-font",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "926eaecc-6a2a-40bb-bc16-120f5ae1b0cc"
+      }
+    }
+  }
+}
