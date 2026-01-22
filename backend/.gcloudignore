@@ -1,0 +1,7 @@
+# Ignore files for Cloud Run deployment
+.git
+.gitignore
+node_modules
+.env
+.env.local
+*.md

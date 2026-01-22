@@ -43,7 +43,7 @@ export function SettingsScreen() {
         setNotificationEnabled(false);
         return;
       }
-      await scheduleRecurringNotification();
+      await scheduleRecurringNotification(true); // Force reschedule when toggling on
     } else {
       await cancelAllNotifications();
     }
@@ -62,7 +62,7 @@ export function SettingsScreen() {
     await updateSettings({ notificationInterval: interval });
     
     if (notificationEnabled) {
-      await scheduleRecurringNotification();
+      await scheduleRecurringNotification(true); // Force reschedule when interval changes
     }
     
     refresh();

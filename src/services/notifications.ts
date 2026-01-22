@@ -45,14 +45,37 @@ export async function requestNotificationPermissions(): Promise<boolean> {
   return true;
 }
 
-export async function scheduleRecurringNotification(): Promise<void> {
-  await cancelAllNotifications();
-
+export async function scheduleRecurringNotification(forceReschedule = false): Promise<void> {
   const settings = await getAllSettings();
   
+  // Check if we already have a notification scheduled
+  const existingNotifications = await Notifications.getAllScheduledNotificationsAsync();
+  const existingReminder = existingNotifications.find(
+    (n) => n.identifier === NOTIFICATION_IDENTIFIER
+  );
+
+  // If notifications are disabled, cancel any existing ones
   if (!settings.notificationEnabled) {
+    if (existingReminder) {
+      await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDENTIFIER);
+    }
     return;
   }
+
+  // Check if existing notification matches current settings
+  if (existingReminder && !forceReschedule) {
+    const existingTrigger = existingReminder.trigger as { seconds?: number } | null;
+    const expectedSeconds = settings.notificationInterval * 60;
+    
+    // If interval matches, keep existing notification (preserves timer after restart)
+    if (existingTrigger?.seconds === expectedSeconds) {
+      console.log('Notification already scheduled with correct interval, keeping existing');
+      return;
+    }
+  }
+
+  // Cancel and reschedule only if needed
+  await cancelAllNotifications();
 
   const intervalMinutes = settings.notificationInterval;
 
@@ -61,7 +84,7 @@ export async function scheduleRecurringNotification(): Promise<void> {
     content: {
       title: '⏰ Time Check!',
       body: 'What have you been working on? Tap to record.',
-      data: { action: 'record' },
+      data: { action: 'record', intervalMinutes },
       sound: true,
     },
     trigger: {
@@ -70,6 +93,8 @@ export async function scheduleRecurringNotification(): Promise<void> {
       repeats: true,
     },
   });
+  
+  console.log(`Notification scheduled: every ${intervalMinutes} minutes`);
 }
 
 export async function cancelAllNotifications(): Promise<void> {

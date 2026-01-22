@@ -1,13 +1,19 @@
 import { getSetting, setSetting } from '../database/settings';
 import { getAllCategories } from '../database/categories';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+// Backend API URL - Cloud Run endpoint
+// For local development: http://localhost:8080
+// For production: Your Cloud Run URL (e.g., https://time-tracking-api-xxxxx-uc.a.run.app)
+const BACKEND_API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
-// API key from environment variable (preferred) or database setting as fallback
-// EXPO_PUBLIC_ prefix makes it available at runtime in Expo
+// Legacy: Direct Gemini API (kept for fallback/migration)
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const ENV_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 
 let cachedApiKey: string | null = null;
+
+// Feature flag: use backend API instead of direct Gemini calls
+const USE_BACKEND_API = process.env.EXPO_PUBLIC_USE_BACKEND !== 'false';
 
 export interface CategorizedActivity {
   summary: string;
@@ -57,14 +63,26 @@ async function getApiKey(): Promise<string | null> {
 
 /**
  * Check if Gemini API is configured
+ * When using backend, we assume it's configured on the server
  */
 export async function isGeminiConfigured(): Promise<boolean> {
+  if (USE_BACKEND_API) {
+    // When using backend, check if backend is reachable
+    try {
+      const response = await fetch(`${BACKEND_API_URL}/health`);
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+  
+  // Legacy: check for direct API key
   const key = await getApiKey();
   return !!key && key !== 'YOUR_API_KEY_HERE';
 }
 
 /**
- * Categorize a transcript using Gemini (text-only, much cheaper than audio)
+ * Categorize a transcript using the backend API (recommended) or direct Gemini call (legacy)
  * Returns an array of activities - Gemini will split multiple activities mentioned in the transcript
  * 
  * @param transcript - The speech transcript to categorize
@@ -73,6 +91,69 @@ export async function isGeminiConfigured(): Promise<boolean> {
 export async function categorizeTranscript(
   transcript: string,
   defaultDurationMinutes: number = 30
+): Promise<CategorizedResult> {
+  // Use backend API if enabled
+  if (USE_BACKEND_API) {
+    return categorizeViaBackend(transcript, defaultDurationMinutes);
+  }
+  
+  // Legacy: direct Gemini API call
+  return categorizeViaDirect(transcript, defaultDurationMinutes);
+}
+
+/**
+ * Categorize via Cloud Run backend (secure - API key on server)
+ */
+async function categorizeViaBackend(
+  transcript: string,
+  defaultDurationMinutes: number
+): Promise<CategorizedResult> {
+  // If transcript is empty, return a default
+  if (!transcript.trim()) {
+    return {
+      activities: [{
+        summary: 'No speech detected',
+        category: 'other',
+        tags: [],
+        duration: 0,
+      }],
+    };
+  }
+
+  // Fetch categories to send to backend
+  const categories = await getAllCategories();
+
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/categorize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        transcript,
+        defaultDurationMinutes,
+        categories: categories.map(c => ({ id: c.id, name: c.name })),
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Backend API error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Backend API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Legacy: Categorize via direct Gemini API call (API key exposed in client)
+ */
+async function categorizeViaDirect(
+  transcript: string,
+  defaultDurationMinutes: number
 ): Promise<CategorizedResult> {
   const apiKey = await getApiKey();
   
@@ -216,6 +297,21 @@ function validateCategory(category: string, validCategories: string[]): string {
 }
 
 export async function testGeminiConnection(): Promise<boolean> {
+  // Use backend API if enabled
+  if (USE_BACKEND_API) {
+    try {
+      const response = await fetch(`${BACKEND_API_URL}/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json();
+      return data.success === true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Legacy: direct API key check
   const apiKey = await getApiKey();
   
   if (!apiKey) {
