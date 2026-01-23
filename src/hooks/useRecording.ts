@@ -3,7 +3,7 @@ import { useAudioRecording } from './useAudioRecording';
 import { transcribeAudioFile, initializeSpeechRecognition } from '../services/speechRecognition';
 import { categorizeTranscript } from '../services/gemini';
 import { createEntry, updateEntry } from '../database/entries';
-import { getAllSettings } from '../database/settings';
+import { getAllSettings, updateSettings } from '../database/settings';
 
 export type RecordingState = 'idle' | 'recording' | 'transcribing' | 'categorizing' | 'error';
 
@@ -23,6 +23,7 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const maxDurationRef = useRef<number>(60);
   const notificationIntervalRef = useRef<number>(30);
+  const lastCheckInTimeRef = useRef<number | null>(null);
   const [localDuration, setLocalDuration] = useState(0);
   
   // Use the hook-based audio recording
@@ -38,6 +39,7 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
     getAllSettings().then((settings) => {
       maxDurationRef.current = settings.maxRecordingDuration;
       notificationIntervalRef.current = settings.notificationInterval;
+      lastCheckInTimeRef.current = settings.lastCheckInTime;
     });
   }, []);
 
@@ -91,7 +93,20 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
         throw new Error('No recording data');
       }
 
-      const recordedAt = Math.floor(Date.now() / 1000);
+      const currentTime = Math.floor(Date.now() / 1000);
+      const recordedAt = currentTime;
+
+      // Calculate elapsed time since last check-in
+      // If no last check-in, use the notification interval as default
+      let elapsedMinutes: number;
+      if (lastCheckInTimeRef.current) {
+        elapsedMinutes = Math.round((currentTime - lastCheckInTimeRef.current) / 60);
+        // Ensure at least 1 minute
+        elapsedMinutes = Math.max(1, elapsedMinutes);
+      } else {
+        // First check-in ever, use notification interval as default
+        elapsedMinutes = notificationIntervalRef.current;
+      }
 
       // Step 1: Transcribe with on-device speech recognition (FREE!)
       let transcript = '';
@@ -103,9 +118,12 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
         // Create a single entry without transcript
         await createEntry({
           recorded_at: recordedAt,
-          duration: notificationIntervalRef.current, // Duration in minutes
+          duration: elapsedMinutes, // Duration in minutes
           audio_uri: result.uri,
         });
+        // Update last check-in time
+        await updateSettings({ lastCheckInTime: currentTime });
+        lastCheckInTimeRef.current = currentTime;
         setError('Transcription failed. Entry saved without transcript.');
         setState('idle');
         onComplete?.();
@@ -117,7 +135,7 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
       try {
         const categorized = await categorizeTranscript(
           transcript,
-          notificationIntervalRef.current
+          elapsedMinutes
         );
         
         // Create an entry for each activity
@@ -139,12 +157,16 @@ export function useRecording(onComplete?: () => void): UseRecordingResult {
         console.error('Gemini categorization failed:', geminiError);
         await createEntry({
           recorded_at: recordedAt,
-          duration: notificationIntervalRef.current, // Duration in minutes
+          duration: elapsedMinutes, // Duration in minutes
           transcript: transcript,
           audio_uri: result.uri,
         });
         setError('Recording saved but categorization failed.');
       }
+
+      // Update last check-in time after successful recording
+      await updateSettings({ lastCheckInTime: currentTime });
+      lastCheckInTimeRef.current = currentTime;
 
       setState('idle');
       setLocalDuration(0);

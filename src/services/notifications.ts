@@ -13,7 +13,38 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const NOTIFICATION_IDENTIFIER = 'time-tracking-reminder';
+const NOTIFICATION_IDENTIFIER_PREFIX = 'time-tracking-reminder-';
+
+// Helper to generate notification times within the allowed window
+function generateNotificationTimes(
+  startHour: number,
+  endHour: number,
+  intervalMinutes: number
+): { hour: number; minute: number }[] {
+  const times: { hour: number; minute: number }[] = [];
+  
+  let currentHour = startHour;
+  let currentMinute = 0;
+  
+  while (currentHour < endHour || (currentHour === endHour && currentMinute === 0)) {
+    times.push({ hour: currentHour, minute: currentMinute });
+    
+    currentMinute += intervalMinutes;
+    while (currentMinute >= 60) {
+      currentMinute -= 60;
+      currentHour += 1;
+    }
+  }
+  
+  // iOS has a limit of ~64 scheduled notifications
+  // If we exceed this, increase the effective interval
+  if (times.length > 60) {
+    console.warn(`Too many notifications (${times.length}), limiting to 60`);
+    return times.slice(0, 60);
+  }
+  
+  return times;
+}
 
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (!Device.isDevice) {
@@ -48,53 +79,83 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 export async function scheduleRecurringNotification(forceReschedule = false): Promise<void> {
   const settings = await getAllSettings();
   
-  // Check if we already have a notification scheduled
+  // Check existing notifications
   const existingNotifications = await Notifications.getAllScheduledNotificationsAsync();
-  const existingReminder = existingNotifications.find(
-    (n) => n.identifier === NOTIFICATION_IDENTIFIER
+  const existingReminders = existingNotifications.filter(
+    (n) => n.identifier.startsWith(NOTIFICATION_IDENTIFIER_PREFIX)
   );
 
   // If notifications are disabled, cancel any existing ones
   if (!settings.notificationEnabled) {
-    if (existingReminder) {
-      await Notifications.cancelScheduledNotificationAsync(NOTIFICATION_IDENTIFIER);
+    for (const reminder of existingReminders) {
+      await Notifications.cancelScheduledNotificationAsync(reminder.identifier);
     }
     return;
   }
 
-  // Check if existing notification matches current settings
-  if (existingReminder && !forceReschedule) {
-    const existingTrigger = existingReminder.trigger as { seconds?: number } | null;
-    const expectedSeconds = settings.notificationInterval * 60;
-    
-    // If interval matches, keep existing notification (preserves timer after restart)
-    if (existingTrigger?.seconds === expectedSeconds) {
-      console.log('Notification already scheduled with correct interval, keeping existing');
+  // Generate the expected notification times
+  const notificationTimes = generateNotificationTimes(
+    settings.notificationStartHour,
+    settings.notificationEndHour,
+    settings.notificationInterval
+  );
+
+  // Check if existing notifications match current settings (avoid unnecessary rescheduling)
+  if (!forceReschedule && existingReminders.length === notificationTimes.length) {
+    const existingTimes = existingReminders.map((n) => {
+      const trigger = n.trigger as { dateComponents?: { hour?: number; minute?: number } } | null;
+      return {
+        hour: trigger?.dateComponents?.hour ?? -1,
+        minute: trigger?.dateComponents?.minute ?? -1,
+      };
+    }).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+
+    const expectedTimes = [...notificationTimes].sort(
+      (a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute)
+    );
+
+    const timesMatch = existingTimes.every(
+      (t, i) => t.hour === expectedTimes[i].hour && t.minute === expectedTimes[i].minute
+    );
+
+    if (timesMatch) {
+      console.log('Notifications already scheduled with correct times, keeping existing');
       return;
     }
   }
 
-  // Cancel and reschedule only if needed
+  // Cancel all existing reminders and reschedule
   await cancelAllNotifications();
 
-  const intervalMinutes = settings.notificationInterval;
-
-  await Notifications.scheduleNotificationAsync({
-    identifier: NOTIFICATION_IDENTIFIER,
-    content: {
-      title: '⏰ Time Check!',
-      body: 'What have you been working on? Tap to record.',
-      data: { action: 'record', intervalMinutes },
-      sound: true,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: intervalMinutes * 60,
-      repeats: true,
-    },
-  });
+  // Schedule a notification for each time slot
+  for (let i = 0; i < notificationTimes.length; i++) {
+    const { hour, minute } = notificationTimes[i];
+    
+    await Notifications.scheduleNotificationAsync({
+      identifier: `${NOTIFICATION_IDENTIFIER_PREFIX}${i}`,
+      content: {
+        title: '⏰ Time Check!',
+        body: 'What have you been working on? Tap to record.',
+        data: { action: 'record' },
+        sound: true,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+        hour,
+        minute,
+        repeats: true,
+      },
+    });
+  }
   
-  console.log(`Notification scheduled: every ${intervalMinutes} minutes`);
+  const formatTime = (h: number, m: number) => 
+    `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  
+  console.log(
+    `Scheduled ${notificationTimes.length} daily notifications from ` +
+    `${formatTime(settings.notificationStartHour, 0)} to ${formatTime(settings.notificationEndHour, 0)} ` +
+    `every ${settings.notificationInterval} minutes`
+  );
 }
 
 export async function cancelAllNotifications(): Promise<void> {

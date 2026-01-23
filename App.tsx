@@ -17,14 +17,26 @@ export default function App() {
 
   useEffect(() => {
     async function setup() {
-      await AudioModule.requestRecordingPermissionsAsync();
-      await requestNotificationPermissions();
-      await scheduleRecurringNotification();
-      
-      // Seed dummy data for testing (force reseed to fix timestamps)
-      await seedDummyData(true);
-      
-      setPermissionsReady(true);
+      try {
+        console.log('[App] Starting setup...');
+        await AudioModule.requestRecordingPermissionsAsync();
+        console.log('[App] Audio permissions done');
+        await requestNotificationPermissions();
+        console.log('[App] Notification permissions done');
+        await scheduleRecurringNotification();
+        console.log('[App] Notifications scheduled');
+        
+        // Seed dummy data for testing (only if needed, not forcing every time)
+        // await seedDummyData(true);
+        // console.log('[App] Seed data done');
+        
+        setPermissionsReady(true);
+        console.log('[App] Setup complete');
+      } catch (err) {
+        console.error('[App] Setup error:', err);
+        // Still mark as ready so app doesn't hang
+        setPermissionsReady(true);
+      }
     }
 
     if (isReady) {

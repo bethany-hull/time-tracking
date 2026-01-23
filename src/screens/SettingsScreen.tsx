@@ -9,6 +9,7 @@ import {
   Switch,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '../hooks/useDatabase';
@@ -20,16 +21,32 @@ import {
 } from '../services/notifications';
 import { CategoryManager } from '../components/CategoryManager';
 
+// Helper to format hour to 12-hour time
+const formatHour = (hour: number): string => {
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:00 ${period}`;
+};
+
+// Generate hours for picker (0-23)
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 export function SettingsScreen() {
   const { settings, loading, refresh } = useSettings();
   
   const [notificationEnabled, setNotificationEnabled] = useState(false);
   const [notificationInterval, setNotificationInterval] = useState('30');
+  const [startHour, setStartHour] = useState(9);
+  const [endHour, setEndHour] = useState(21);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
 
   useEffect(() => {
     if (settings) {
       setNotificationEnabled(settings.notificationEnabled);
       setNotificationInterval(settings.notificationInterval.toString());
+      setStartHour(settings.notificationStartHour);
+      setEndHour(settings.notificationEndHour);
     }
   }, [settings]);
 
@@ -67,6 +84,36 @@ export function SettingsScreen() {
     
     refresh();
     Alert.alert('Saved', `Notification interval set to ${interval} minutes`);
+  };
+
+  const handleStartHourChange = async (hour: number) => {
+    if (hour >= endHour) {
+      Alert.alert('Invalid Time', 'Start time must be before end time');
+      return;
+    }
+    setStartHour(hour);
+    setShowStartPicker(false);
+    await updateSettings({ notificationStartHour: hour });
+    
+    if (notificationEnabled) {
+      await scheduleRecurringNotification(true);
+    }
+    refresh();
+  };
+
+  const handleEndHourChange = async (hour: number) => {
+    if (hour <= startHour) {
+      Alert.alert('Invalid Time', 'End time must be after start time');
+      return;
+    }
+    setEndHour(hour);
+    setShowEndPicker(false);
+    await updateSettings({ notificationEndHour: hour });
+    
+    if (notificationEnabled) {
+      await scheduleRecurringNotification(true);
+    }
+    refresh();
   };
 
   if (loading) {
@@ -119,7 +166,135 @@ export function SettingsScreen() {
               <Text style={styles.inputSuffix}>min</Text>
             </View>
           </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Active Hours</Text>
+              <Text style={styles.settingDescription}>
+                Only send notifications during these hours
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.timeRow}>
+            <TouchableOpacity 
+              style={styles.timeButton}
+              onPress={() => setShowStartPicker(true)}
+            >
+              <Text style={styles.timeLabel}>Start</Text>
+              <Text style={styles.timeValue}>{formatHour(startHour)}</Text>
+            </TouchableOpacity>
+            
+            <Ionicons name="arrow-forward" size={20} color="#9ca3af" />
+            
+            <TouchableOpacity 
+              style={styles.timeButton}
+              onPress={() => setShowEndPicker(true)}
+            >
+              <Text style={styles.timeLabel}>End</Text>
+              <Text style={styles.timeValue}>{formatHour(endHour)}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Time Picker Modals */}
+        <Modal
+          visible={showStartPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowStartPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity 
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowStartPicker(false)}
+            />
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerTitle}>Start Time</Text>
+              <ScrollView 
+                style={styles.pickerScroll}
+                showsVerticalScrollIndicator={true}
+              >
+                {HOURS.map((hour) => (
+                  <TouchableOpacity
+                    key={hour}
+                    style={[
+                      styles.pickerItem,
+                      hour === startHour && styles.pickerItemSelected,
+                      hour >= endHour && styles.pickerItemDisabled,
+                    ]}
+                    onPress={() => handleStartHourChange(hour)}
+                    disabled={hour >= endHour}
+                  >
+                    <Text style={[
+                      styles.pickerItemText,
+                      hour === startHour && styles.pickerItemTextSelected,
+                      hour >= endHour && styles.pickerItemTextDisabled,
+                    ]}>
+                      {formatHour(hour)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity 
+                style={styles.pickerCloseButton}
+                onPress={() => setShowStartPicker(false)}
+              >
+                <Text style={styles.pickerCloseText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showEndPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowEndPicker(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity 
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowEndPicker(false)}
+            />
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerTitle}>End Time</Text>
+              <ScrollView 
+                style={styles.pickerScroll}
+                showsVerticalScrollIndicator={true}
+              >
+                {HOURS.map((hour) => (
+                  <TouchableOpacity
+                    key={hour}
+                    style={[
+                      styles.pickerItem,
+                      hour === endHour && styles.pickerItemSelected,
+                      hour <= startHour && styles.pickerItemDisabled,
+                    ]}
+                    onPress={() => handleEndHourChange(hour)}
+                    disabled={hour <= startHour}
+                  >
+                    <Text style={[
+                      styles.pickerItemText,
+                      hour === endHour && styles.pickerItemTextSelected,
+                      hour <= startHour && styles.pickerItemTextDisabled,
+                    ]}>
+                      {formatHour(hour)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity 
+                style={styles.pickerCloseButton}
+                onPress={() => setShowEndPicker(false)}
+              >
+                <Text style={styles.pickerCloseText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* Categories Section */}
         <CategoryManager />
@@ -204,6 +379,98 @@ const styles = StyleSheet.create({
   inputSuffix: {
     fontSize: 14,
     color: '#6b7280',
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    gap: 16,
+  },
+  timeButton: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  timeLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  timeValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  pickerContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '80%',
+    maxHeight: '70%',
+    overflow: 'hidden',
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+    textAlign: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  pickerScroll: {
+    flexGrow: 0,
+  },
+  pickerCloseButton: {
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    alignItems: 'center',
+  },
+  pickerCloseText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  pickerItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#eef2ff',
+  },
+  pickerItemDisabled: {
+    opacity: 0.4,
+  },
+  pickerItemText: {
+    fontSize: 16,
+    color: '#1f2937',
+    textAlign: 'center',
+  },
+  pickerItemTextSelected: {
+    color: '#6366f1',
+    fontWeight: '600',
+  },
+  pickerItemTextDisabled: {
+    color: '#9ca3af',
   },
   button: {
     flexDirection: 'row',
